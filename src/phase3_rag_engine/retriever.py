@@ -25,8 +25,8 @@ class FactRetriever:
         """
         logging.info(f"Processing query: '{query}'")
         # 3.1 Query Processing
-        # Convert tensor to list
-        query_embedding = self.model.encode([query]).tolist()
+        emb = self.model.encode([query])
+        query_embedding = emb.tolist() if hasattr(emb, 'tolist') else emb
         
         # 3.2 Semantic Retrieval
         results = self.collection.query(

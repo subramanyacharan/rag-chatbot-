@@ -47,8 +47,8 @@ class VectorDBManager:
         ids = [str(uuid.uuid4()) for _ in range(len(chunks))]
         
         logging.info(f"Generating embeddings for {len(texts)} chunks...")
-        # Convert tensor to list for ChromaDB
-        embeddings = self.model.encode(texts).tolist()
+        emb = self.model.encode(texts)
+        embeddings = emb.tolist() if hasattr(emb, 'tolist') else emb
         
         logging.info("Upserting into ChromaDB collection...")
         self.collection.upsert(

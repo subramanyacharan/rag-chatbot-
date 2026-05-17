@@ -1,11 +1,6 @@
 @import "tailwindcss";
 
-@theme {
-  --color-background: #0B120E;
-  --color-mint: #38FFC3;
-  --color-card: #151E19;
-  --color-user-bubble: #1C2621;
-}
+@config "../tailwind.config.js";
 
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;

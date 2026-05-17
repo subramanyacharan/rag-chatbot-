@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Plus, 
   Database, 
@@ -7,8 +7,7 @@ import {
   ShieldCheck, 
   FileText, 
   HelpCircle, 
-  LogOut, 
-  MessageSquare,
+  LogOut,
   AlertTriangle,
   Bell,
   Settings,
@@ -58,7 +57,7 @@ function App() {
       };
       
       setMessages(prev => [...prev, assistantMsg]);
-    } catch (error) {
+    } catch {
       setMessages(prev => [...prev, { 
         role: 'assistant', 
         content: "Sorry, I'm having trouble connecting to the backend. Please ensure the API is running." 
