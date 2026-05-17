@@ -7,11 +7,12 @@ import os
 
 app = FastAPI(title="FundQuest AI API")
 
-# Configure CORS for Vercel deployment
+# CORS: credentials cannot be used with allow_origins=["*"] (browser blocks the response).
+_cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, you can restrict this to your Vercel domain
-    allow_credentials=True,
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -30,7 +31,11 @@ async def root():
 async def chat(request: QueryRequest):
     try:
         response_data = generator.generate_structured_response(request.query)
+        if response_data.get("status") in ("error", "config_error", "rate_limited"):
+            raise HTTPException(status_code=503, detail=response_data.get("answer"))
         return response_data
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

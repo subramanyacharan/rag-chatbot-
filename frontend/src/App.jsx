@@ -29,6 +29,13 @@ function App() {
     }
   }, [messages]);
 
+  const getApiUrl = () => {
+    const url = import.meta.env.VITE_API_URL?.replace(/\/$/, '');
+    if (url) return url;
+    if (import.meta.env.DEV) return 'http://localhost:8000';
+    return null;
+  };
+
   const handleSend = async (e) => {
     if (e) e.preventDefault();
     if (!query.trim() || loading) return;
@@ -39,28 +46,83 @@ function App() {
     setQuery('');
     setLoading(true);
 
+    const apiUrl = getApiUrl();
+    if (!apiUrl) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'The assistant is temporarily unavailable. Please try again in a few minutes.',
+        isError: true,
+      }]);
+      setLoading(false);
+      return;
+    }
+
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const response = await fetch(`${apiUrl}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: currentQuery }),
       });
-      
-      const data = await response.json();
-      
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(`Invalid response (${response.status})`);
+      }
+
+      if (!response.ok) {
+        const detail = typeof data?.detail === 'string'
+          ? data.detail
+          : data?.error || 'The service returned an error.';
+        throw new Error(detail);
+      }
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const failedStatuses = ['error', 'config_error', 'rate_limited'];
+      if (failedStatuses.includes(data.status)) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: data.answer || 'The assistant is temporarily unavailable. Please try again in a few minutes.',
+          isError: true,
+        }]);
+        return;
+      }
+
+      const answer = data.answer ?? 'I do not have the information to answer that.';
+      if (typeof answer === 'string' && /^Error:/i.test(answer)) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'The assistant is temporarily unavailable. Please try again in a few minutes.',
+          isError: true,
+        }]);
+        return;
+      }
+
       const assistantMsg = {
         role: 'assistant',
-        content: data.answer,
+        content: answer,
         metrics: data.metrics,
-        source: data.source
+        source: data.source,
       };
-      
+
       setMessages(prev => [...prev, assistantMsg]);
-    } catch {
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: "Sorry, I'm having trouble connecting to the backend. Please ensure the API is running." 
+    } catch (err) {
+      console.error('Chat request failed:', err);
+      const isConfig = !import.meta.env.VITE_API_URL && !import.meta.env.DEV;
+      const message = isConfig
+        ? 'The assistant is temporarily unavailable. Please try again in a few minutes.'
+        : (err instanceof Error && err.message && !err.message.includes('Failed to fetch')
+          ? err.message
+          : 'The assistant is temporarily unavailable. Please try again in a few minutes.');
+
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: message,
+        isError: true,
       }]);
     } finally {
       setLoading(false);
@@ -144,7 +206,7 @@ function App() {
                   {msg.content}
                 </div>
               ) : (
-                <div className="bg-card border border-white/5 rounded-2xl p-6 max-w-2xl w-full">
+                <div className={`bg-card border rounded-2xl p-6 max-w-2xl w-full ${msg.isError ? 'border-red-500/30' : 'border-white/5'}`}>
                   <div className="flex items-center gap-2 mb-4">
                     <div className="bg-mint/20 p-1.5 rounded-md">
                       <Bot className="w-4 h-4 text-mint" />

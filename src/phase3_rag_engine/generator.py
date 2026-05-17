@@ -1,19 +1,58 @@
 """Phase 3.3 and 3.4: LLM Prompting and Response Generation."""
+import json
 import os
 import logging
-from groq import Groq
+from groq import (
+    Groq,
+    APIConnectionError,
+    APITimeoutError,
+    AuthenticationError,
+    RateLimitError,
+    APIStatusError,
+)
 from dotenv import load_dotenv
 from src.phase3_rag_engine.retriever import FactRetriever
 from src.phase4_guardrails.guardrails import InputGuard, OutputGuard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+USER_UNAVAILABLE_MSG = (
+    "The assistant is temporarily unavailable. Please try again in a few minutes."
+)
+
 # Local dev: load .env if present. Railway/Vercel inject vars via the platform.
 load_dotenv()
-if not os.environ.get("GROQ_API_KEY"):
+if not os.environ.get("GROQ_API_KEY", "").strip():
     logging.warning(
         "GROQ_API_KEY is not set. Add it to .env locally or to Railway service variables."
     )
+
+
+def _structured_error(status: str = "error", message: str | None = None) -> dict:
+    return {
+        "answer": message or USER_UNAVAILABLE_MSG,
+        "metrics": {},
+        "source": None,
+        "status": status,
+    }
+
+
+def _groq_error_response(exc: Exception) -> dict:
+    if isinstance(exc, AuthenticationError):
+        logging.error("Groq authentication failed — check GROQ_API_KEY on Railway.")
+        return _structured_error("config_error")
+    if isinstance(exc, RateLimitError):
+        logging.error("Groq rate limit exceeded: %s", exc)
+        return _structured_error("rate_limited")
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        logging.error("Groq connection failed: %s", exc)
+        return _structured_error()
+    if isinstance(exc, APIStatusError):
+        logging.error("Groq API error (%s): %s", exc.status_code, exc)
+        return _structured_error()
+    logging.error("Unexpected generation error: %s", exc)
+    return _structured_error()
+
 
 class RAGGenerator:
     def __init__(self, retriever=None, model="llama-3.1-8b-instant"):
@@ -21,13 +60,16 @@ class RAGGenerator:
         self.model = model
         self.input_guard = InputGuard()
         self.output_guard = OutputGuard()
-        
-        # Initialize Groq client
-        self.api_key = os.environ.get("GROQ_API_KEY")
+
+        self.api_key = os.environ.get("GROQ_API_KEY", "").strip()
         if not self.api_key:
-            logging.warning(f"GROQ_API_KEY is None! Current keys: {list(os.environ.keys())[:10]}...")
-        
-        self.client = Groq(api_key=self.api_key) if self.api_key else None
+            logging.warning("GROQ_API_KEY is missing or empty.")
+
+        self.client = (
+            Groq(api_key=self.api_key, timeout=60.0, max_retries=2)
+            if self.api_key
+            else None
+        )
 
     def construct_prompt(self, query: str, context_chunks: list) -> str:
         """Phase 3.3: Construct a strict prompt using the retrieved context."""
@@ -118,7 +160,7 @@ Context:
             }
             
         if not self.client:
-            return {"error": "GROQ_API_KEY not set"}
+            return _structured_error("config_error")
             
         chunks = self.retriever.retrieve_context(query)
         if not chunks:
@@ -162,7 +204,6 @@ Return your response in EXACTLY this JSON format:
                 response_format={"type": "json_object"}
             )
             
-            import json
             result = json.loads(chat_completion.choices[0].message.content)
             
             # Post-generation Output Guardrail
@@ -179,14 +220,10 @@ Return your response in EXACTLY this JSON format:
             
             return result
             
+        except (APIConnectionError, APITimeoutError, AuthenticationError, RateLimitError, APIStatusError) as e:
+            return _groq_error_response(e)
         except Exception as e:
-            logging.error(f"Error in structured generation: {e}")
-            return {
-                "answer": f"Error: {e}",
-                "metrics": {},
-                "source": None,
-                "status": "error"
-            }
+            return _groq_error_response(e)
 
 if __name__ == "__main__":
     # Note: Requires GROQ_API_KEY environment variable

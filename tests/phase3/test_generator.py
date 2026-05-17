@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from src.phase3_rag_engine.generator import RAGGenerator
+from groq import APIConnectionError
+from src.phase3_rag_engine.generator import RAGGenerator, USER_UNAVAILABLE_MSG
 
 @pytest.fixture
 def mock_retriever():
@@ -54,3 +55,19 @@ def test_generate_response(mock_groq_class, mock_retriever):
     assert "The expense ratio is 0.73%." in response
     assert "Last updated from sources: 2026-05-05" in response
     assert "[HDFC Mid Cap](http://example.com/hdfc-midcap)" in response
+
+
+@patch("src.phase3_rag_engine.generator.Groq")
+def test_structured_response_groq_connection_error(mock_groq_class, mock_retriever):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = APIConnectionError(request=MagicMock())
+    mock_groq_class.return_value = mock_client
+
+    generator = RAGGenerator(retriever=mock_retriever)
+    generator.client = mock_client
+
+    result = generator.generate_structured_response("What is the NAV?")
+
+    assert result["status"] == "error"
+    assert result["answer"] == USER_UNAVAILABLE_MSG
+    assert "Connection error" not in result["answer"]
