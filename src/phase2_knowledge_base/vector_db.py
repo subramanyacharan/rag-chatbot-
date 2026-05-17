@@ -9,6 +9,44 @@ from sentence_transformers import SentenceTransformer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+DEFAULT_CHUNKS_FILE = "data/chunks/all_tagged_chunks.json"
+DEFAULT_DB_DIR = "data/chroma_db"
+DEFAULT_COLLECTION_NAME = "mutual_fund_facts"
+
+
+def ensure_vector_db_populated(
+    chunks_file=DEFAULT_CHUNKS_FILE,
+    db_dir=DEFAULT_DB_DIR,
+    collection_name=DEFAULT_COLLECTION_NAME,
+):
+    """Create and populate the Chroma collection when missing or empty (e.g. on Railway)."""
+    if not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+
+    client = chromadb.PersistentClient(path=db_dir)
+    collection = client.get_or_create_collection(name=collection_name)
+    if collection.count() > 0:
+        logging.info(
+            "ChromaDB collection '%s' ready (%d documents).",
+            collection_name,
+            collection.count(),
+        )
+        return
+
+    if not os.path.exists(chunks_file):
+        raise FileNotFoundError(
+            f"Chroma collection '{collection_name}' is empty and chunks file not found: {chunks_file}"
+        )
+
+    logging.info(
+        "ChromaDB collection '%s' is empty; populating from %s...",
+        collection_name,
+        chunks_file,
+    )
+    manager = VectorDBManager(chunks_file, db_dir, collection_name)
+    manager.process_and_store()
+
+
 class VectorDBManager:
     def __init__(self, chunks_file, db_dir, collection_name="mutual_fund_facts"):
         self.chunks_file = chunks_file

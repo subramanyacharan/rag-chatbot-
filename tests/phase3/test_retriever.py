@@ -4,7 +4,8 @@ from src.phase3_rag_engine.retriever import FactRetriever
 
 @pytest.fixture
 def mock_retriever():
-    with patch('src.phase3_rag_engine.retriever.SentenceTransformer') as mock_model, \
+    with patch('src.phase3_rag_engine.retriever.ensure_vector_db_populated'), \
+         patch('src.phase3_rag_engine.retriever.SentenceTransformer') as mock_model, \
          patch('src.phase3_rag_engine.retriever.chromadb.PersistentClient') as mock_chroma:
         
         mock_instance = MagicMock()
@@ -21,7 +22,7 @@ def mock_retriever():
             'distances': [[0.2, 0.4]]
         }
         
-        mock_client.get_collection.return_value = mock_collection
+        mock_client.get_or_create_collection.return_value = mock_collection
         mock_chroma.return_value = mock_client
         
         retriever = FactRetriever("dummy_path")

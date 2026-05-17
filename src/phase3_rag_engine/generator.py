@@ -6,22 +6,14 @@ from dotenv import load_dotenv
 from src.phase3_rag_engine.retriever import FactRetriever
 from src.phase4_guardrails.guardrails import InputGuard, OutputGuard
 
-from dotenv import load_dotenv
-import os
-
-# Explicitly load .env from the project root
-env_path = os.path.join(os.getcwd(), '.env')
-loaded = load_dotenv(dotenv_path=env_path)
-if not loaded:
-    logging.warning(f"Failed to load .env file from {env_path}")
-else:
-    logging.info(f"Successfully loaded .env file from {env_path}")
-    if "GROQ_API_KEY" in os.environ:
-        logging.info("GROQ_API_KEY found in environment.")
-    else:
-        logging.warning("GROQ_API_KEY NOT found in environment after loading .env!")
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Local dev: load .env if present. Railway/Vercel inject vars via the platform.
+load_dotenv()
+if not os.environ.get("GROQ_API_KEY"):
+    logging.warning(
+        "GROQ_API_KEY is not set. Add it to .env locally or to Railway service variables."
+    )
 
 class RAGGenerator:
     def __init__(self, retriever=None, model="llama-3.1-8b-instant"):

@@ -4,19 +4,37 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 import logging
 
+from src.phase2_knowledge_base.vector_db import ensure_vector_db_populated
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class FactRetriever:
-    def __init__(self, db_dir="data/chroma_db", collection_name="mutual_fund_facts"):
-        self.db_dir = db_dir
+    def __init__(
+        self,
+        db_dir=None,
+        collection_name="mutual_fund_facts",
+        chunks_file=None,
+    ):
+        self.db_dir = db_dir or os.environ.get("CHROMA_DB_DIR", "data/chroma_db")
         self.collection_name = collection_name
-        
+        self.chunks_file = chunks_file or os.environ.get(
+            "CHUNKS_FILE", "data/chunks/all_tagged_chunks.json"
+        )
+
+        ensure_vector_db_populated(
+            chunks_file=self.chunks_file,
+            db_dir=self.db_dir,
+            collection_name=self.collection_name,
+        )
+
         logging.info("Loading embedding model (BAAI/bge-small-en-v1.5)...")
         self.model = SentenceTransformer('BAAI/bge-small-en-v1.5')
         
         logging.info("Connecting to ChromaDB...")
         self.chroma_client = chromadb.PersistentClient(path=self.db_dir)
-        self.collection = self.chroma_client.get_collection(name=self.collection_name)
+        self.collection = self.chroma_client.get_or_create_collection(
+            name=self.collection_name
+        )
 
     def retrieve_context(self, query: str, top_k: int = 3):
         """
