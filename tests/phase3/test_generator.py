@@ -12,7 +12,8 @@ def mock_retriever():
             "metadata": {
                 "source_url": "http://example.com/hdfc-midcap",
                 "last_updated": "2026-05-05T12:00:00",
-                "fund_name": "HDFC Mid Cap",
+                "fund_name": "HDFC Mid Cap Fund Direct Growth",
+                "fund_slug": "hdfc-mid-cap-fund-direct-growth",
             },
             "distance": 0.2,
         }
@@ -55,7 +56,7 @@ def test_generate_response(mock_groq_class, mock_retriever):
     # Assert response and footer
     assert "The expense ratio is 0.73%." in response
     assert "Last updated from sources: 2026-05-05" in response
-    assert "[HDFC Mid Cap](http://example.com/hdfc-midcap)" in response
+    assert "[HDFC Mid Cap Fund Direct Growth](http://example.com/hdfc-midcap)" in response
 
 
 @patch("src.phase3_rag_engine.generator.Groq")

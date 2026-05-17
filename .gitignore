@@ -45,5 +45,5 @@ yarn-error.log*
 *.swp
 *.swo
 
-# Project specific
-data/chroma_db/
+# Project specific (chroma_db is committed for fast Railway deploys)
+# data/chroma_db/ — tracked in git

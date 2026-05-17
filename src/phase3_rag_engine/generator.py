@@ -11,7 +11,11 @@ from groq import (
     APIStatusError,
 )
 from dotenv import load_dotenv
-from src.phase3_rag_engine.retriever import FactRetriever
+from src.phase3_rag_engine.retriever import (
+    FactRetriever,
+    RELEVANCE_MAX_DISTANCE,
+    pick_source_chunk,
+)
 from src.phase4_guardrails.guardrails import InputGuard, OutputGuard
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -27,8 +31,6 @@ if not os.environ.get("GROQ_API_KEY", "").strip():
         "GROQ_API_KEY is not set. Add it to .env locally or to Railway service variables."
     )
 
-
-RELEVANCE_MAX_DISTANCE = float(os.environ.get("RELEVANCE_MAX_DISTANCE", "1.15"))
 
 NO_SOURCE_ANSWER_MARKERS = (
     "i do not have the information",
@@ -248,8 +250,9 @@ Return your response in EXACTLY this JSON format:
                 return result
 
             result["status"] = "success"
-            if _should_attach_source(chunks, result["answer"], result["status"]):
-                primary_meta = chunks[0]["metadata"]
+            source_chunk = pick_source_chunk(query, chunks)
+            if _should_attach_source(chunks, result["answer"], result["status"]) and source_chunk:
+                primary_meta = source_chunk["metadata"]
                 result["source"] = {
                     "fund_name": primary_meta.get("fund_name"),
                     "url": primary_meta.get("source_url"),

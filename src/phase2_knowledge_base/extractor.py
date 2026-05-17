@@ -4,6 +4,8 @@ import json
 import re
 import logging
 
+from src.phase2_knowledge_base.fund_registry import fund_from_slug
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class FactExtractor:
@@ -43,10 +45,12 @@ class FactExtractor:
         if benchmark_match:
             facts['benchmark'] = benchmark_match.group(1).strip()
             
-        # Exit Load
-        exit_load_match = re.search(r"Exit load of (.*?)\.", text)
+        # Exit Load — first policy sentence only (avoid historical table noise)
+        exit_load_match = re.search(
+            r"(Exit load of \d+(?:\.\d+)?%[^.]*\.)", text, re.IGNORECASE
+        )
         if exit_load_match:
-            facts['exit_load'] = exit_load_match.group(0).strip()
+            facts["exit_load"] = exit_load_match.group(1).strip()
             
         # Fund Manager 
         fm_match = re.search(r"([^.]+) is the Current Fund Manager", text)
@@ -98,18 +102,24 @@ class FactExtractor:
             
             # Derive fund name from URL or text
             fund_slug = filename.replace(".json", "")
-            fund_name = fund_slug.replace("-", " ").title()
-            
+            registry_entry = fund_from_slug(fund_slug)
+            fund_name = (
+                registry_entry["fund_name"]
+                if registry_entry
+                else fund_slug.replace("-", " ").title()
+            )
+
             facts = self.extract_facts(text)
             clean_text = self.generate_sentences(fund_name, facts)
             
             # Save the processed data
             processed_data = {
+                "fund_slug": fund_slug,
                 "fund_name": fund_name,
-                "url": data.get("url"),
+                "url": data.get("url") or (registry_entry["url"] if registry_entry else ""),
                 "last_updated": data.get("last_updated"),
                 "extracted_facts": facts,
-                "processed_text": clean_text
+                "processed_text": clean_text,
             }
             
             with open(processed_path, 'w', encoding='utf-8') as f:

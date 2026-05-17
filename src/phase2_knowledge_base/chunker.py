@@ -39,20 +39,21 @@ class DocumentChunker:
                 continue
                 
             fund_name = data.get("fund_name", "")
+            fund_slug = data.get("fund_slug", filename.replace(".json", ""))
             url = data.get("url", "")
             last_updated = data.get("last_updated", "")
-            
+
             chunks = self.chunk_text(text)
-            
-            # Attach metadata (Phase 2.3)
+
             for chunk in chunks:
                 chunk_obj = {
                     "text": chunk,
                     "metadata": {
                         "fund_name": fund_name,
+                        "fund_slug": fund_slug,
                         "source_url": url,
-                        "last_updated": last_updated
-                    }
+                        "last_updated": last_updated,
+                    },
                 }
                 all_chunks.append(chunk_obj)
                 
