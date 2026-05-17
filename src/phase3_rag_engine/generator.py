@@ -11,10 +11,13 @@ from groq import (
     APIStatusError,
 )
 from dotenv import load_dotenv
-from src.phase3_rag_engine.retriever import (
-    FactRetriever,
-    RELEVANCE_MAX_DISTANCE,
-    pick_source_chunk,
+from src.phase3_rag_engine.retriever import FactRetriever, RELEVANCE_MAX_DISTANCE, pick_source_chunk
+from src.phase3_rag_engine.query_policy import (
+    classify_query,
+    filter_chunks_for_query,
+    filter_metrics_for_query,
+    can_show_source,
+    _available_funds_hint,
 )
 from src.phase4_guardrails.guardrails import InputGuard, OutputGuard
 
@@ -24,21 +27,11 @@ USER_UNAVAILABLE_MSG = (
     "The assistant is temporarily unavailable. Please try again in a few minutes."
 )
 
-# Local dev: load .env if present. Railway/Vercel inject vars via the platform.
 load_dotenv()
 if not os.environ.get("GROQ_API_KEY", "").strip():
     logging.warning(
         "GROQ_API_KEY is not set. Add it to .env locally or to Railway service variables."
     )
-
-
-NO_SOURCE_ANSWER_MARKERS = (
-    "i do not have the information",
-    "cannot provide investment advice",
-    "flagged by safety guardrails",
-    "factual assistant and cannot",
-    "consult a sebi-registered",
-)
 
 
 def _structured_error(status: str = "error", message: str | None = None) -> dict:
@@ -55,13 +48,6 @@ def _is_context_relevant(chunks: list) -> bool:
     if not chunks:
         return False
     return chunks[0].get("distance", float("inf")) <= RELEVANCE_MAX_DISTANCE
-
-
-def _should_attach_source(chunks: list, answer: str, status: str) -> bool:
-    if status != "success" or not _is_context_relevant(chunks):
-        return False
-    lower = answer.lower()
-    return not any(marker in lower for marker in NO_SOURCE_ANSWER_MARKERS)
 
 
 def _no_context_response() -> dict:
@@ -91,6 +77,33 @@ def _groq_error_response(exc: Exception) -> dict:
     return _structured_error()
 
 
+def _build_json_prompt(query: str, context_chunks: list, fund_name: str | None) -> str:
+    context_text = "\n".join(f"- {chunk['text']}" for chunk in context_chunks)
+    fund_rule = (
+        f'Answer ONLY about "{fund_name}". Do NOT mention or compare other funds.'
+        if fund_name
+        else "Answer only from the context provided."
+    )
+    return f"""You are a factual HDFC Mutual Fund FAQ assistant.
+
+Rules:
+1. {fund_rule}
+2. Answer ONLY what the user asked — do not list extra metrics or facts they did not request.
+3. Use ONLY the Context below. If the answer is not in Context, say: "I do not have the information to answer that."
+4. Maximum 2 sentences in "answer".
+5. In "metrics", include ONLY fields the user asked about (leave others out entirely).
+
+Context:
+{context_text}
+
+Return EXACTLY this JSON (omit metric keys you were not asked about):
+{{
+  "answer": "Your concise factual answer naming the fund.",
+  "metrics": {{}}
+}}
+"""
+
+
 class RAGGenerator:
     def __init__(self, retriever=None, model="llama-3.1-8b-instant"):
         self.retriever = retriever or FactRetriever()
@@ -108,85 +121,7 @@ class RAGGenerator:
             else None
         )
 
-    def construct_prompt(self, query: str, context_chunks: list) -> str:
-        """Phase 3.3: Construct a strict prompt using the retrieved context."""
-        
-        context_text = "\n".join([f"- {chunk['text']}" for chunk in context_chunks])
-        
-        system_prompt = f"""You are a highly restricted, factual Mutual Fund FAQ assistant.
-Your strict instructions:
-1. Answer the user's question ONLY using the provided Context.
-2. If the answer is not contained in the Context, you must reply: "I do not have the information to answer that."
-3. Keep your response concise (maximum 3 sentences).
-4. Maintain a neutral, factual tone. DO NOT give investment advice or opinions.
-
-Context:
-{context_text}
-"""
-        return system_prompt
-
-    def generate_response(self, query: str) -> str:
-        """Phase 3.4: Generate response via Groq and append citation footer."""
-        
-        # Phase 4.1: Input Guardrail Check
-        is_safe, msg = self.input_guard.check_query(query)
-        if not is_safe:
-            return msg
-            
-        if not self.client:
-            return "Error: GROQ_API_KEY is not configured."
-            
-        logging.info(f"Retrieving context for query: '{query}'")
-        chunks = self.retriever.retrieve_context(query)
-        
-        if not chunks:
-            return "I do not have the information to answer that."
-            
-        system_prompt = self.construct_prompt(query, chunks)
-        
-        logging.info("Generating response via Groq API...")
-        try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": query,
-                    }
-                ],
-                model=self.model,
-                temperature=0.0, # Zero temperature for factual consistency
-            )
-            
-            raw_response = chat_completion.choices[0].message.content.strip()
-            
-            # Phase 4.2: Output Guardrail Check
-            safe_response = self.output_guard.check_response(raw_response)
-            if "flagged by safety guardrails" in safe_response:
-                return safe_response
-            
-            # Format Footer (Phase 3.4)
-            # Use the first chunk's metadata for the primary citation
-            primary_meta = chunks[0]['metadata']
-            date = primary_meta.get("last_updated", "Unknown Date").split("T")[0]
-            url = primary_meta.get("source_url", "#")
-            fund_name = primary_meta.get("fund_name", "Source")
-            
-            footer = f"\n\n*Last updated from sources: {date} | [{fund_name}]({url})*"
-            
-            return safe_response + footer
-            
-        except Exception as e:
-            logging.error(f"Error during generation: {e}")
-            return f"An error occurred while generating the response: {e}"
-
     def generate_structured_response(self, query: str) -> dict:
-        """Phase 5.1: Generate a structured JSON response for the API."""
-        
-        # Guardrail Check
         is_safe, msg = self.input_guard.check_query(query)
         if not is_safe:
             return {
@@ -196,51 +131,59 @@ Context:
                 "show_source": False,
                 "status": "blocked",
             }
-            
+
+        policy = classify_query(query)
+
+        if policy["kind"] == "off_topic":
+            return {
+                "answer": (
+                    "I can only answer factual questions about specific HDFC mutual funds "
+                    "in my knowledge base (expense ratio, NAV, exit load, etc.). "
+                    + _available_funds_hint()
+                ),
+                "metrics": {},
+                "source": None,
+                "show_source": False,
+                "status": "blocked",
+            }
+
+        if policy["kind"] == "needs_fund":
+            return {
+                "answer": _available_funds_hint(),
+                "metrics": {},
+                "source": None,
+                "show_source": False,
+                "status": "needs_fund",
+            }
+
         if not self.client:
             return _structured_error("config_error")
-            
-        chunks = self.retriever.retrieve_context(query)
+
+        chunks = self.retriever.retrieve_context(
+            query, fund_slug=policy["fund_slug"]
+        )
+        chunks = filter_chunks_for_query(query, chunks)
+
         if not chunks or not _is_context_relevant(chunks):
             return _no_context_response()
-            
-        context_text = "\n".join([f"- {chunk['text']}" for chunk in chunks])
-        
-        # Prompt for JSON
-        json_prompt = f"""You are a highly restricted, factual Mutual Fund FAQ assistant.
-Answer the user's question ONLY using the provided Context.
-Keep the answer concise (max 2 sentences).
-Also extract key metrics like Expense Ratio, Exit Load, or NAV if present in the context.
 
-Context:
-{context_text}
-
-Return your response in EXACTLY this JSON format:
-{{
-  "answer": "Your factual answer here.",
-  "metrics": {{
-    "Expense Ratio": "val",
-    "Exit Load": "val",
-    "NAV": "val"
-  }}
-}}
-"""
+        json_prompt = _build_json_prompt(query, chunks, policy["fund_name"])
 
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": json_prompt},
-                    {"role": "user", "content": query}
+                    {"role": "user", "content": query},
                 ],
                 model=self.model,
                 temperature=0.0,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
-            
+
             result = json.loads(chat_completion.choices[0].message.content)
-            
-            # Post-generation Output Guardrail
-            result["answer"] = self.output_guard.check_response(result["answer"])
+            result["answer"] = self.output_guard.check_response(
+                result.get("answer", "")
+            )
 
             if "flagged by safety guardrails" in result["answer"].lower():
                 result["metrics"] = {}
@@ -249,14 +192,17 @@ Return your response in EXACTLY this JSON format:
                 result["status"] = "blocked"
                 return result
 
+            raw_metrics = result.get("metrics") or {}
+            result["metrics"] = filter_metrics_for_query(query, raw_metrics)
             result["status"] = "success"
+
             source_chunk = pick_source_chunk(query, chunks)
-            if _should_attach_source(chunks, result["answer"], result["status"]) and source_chunk:
-                primary_meta = source_chunk["metadata"]
+            if can_show_source(query, chunks, result["answer"], result["status"]) and source_chunk:
+                meta = source_chunk["metadata"]
                 result["source"] = {
-                    "fund_name": primary_meta.get("fund_name"),
-                    "url": primary_meta.get("source_url"),
-                    "last_updated": primary_meta.get("last_updated", "").split("T")[0],
+                    "fund_name": meta.get("fund_name"),
+                    "url": meta.get("source_url"),
+                    "last_updated": meta.get("last_updated", "").split("T")[0],
                 }
                 result["show_source"] = True
             else:
@@ -266,17 +212,19 @@ Return your response in EXACTLY this JSON format:
                     result["status"] = "no_context"
 
             return result
-            
+
         except (APIConnectionError, APITimeoutError, AuthenticationError, RateLimitError, APIStatusError) as e:
             return _groq_error_response(e)
         except Exception as e:
             return _groq_error_response(e)
 
-if __name__ == "__main__":
-    # Note: Requires GROQ_API_KEY environment variable
-    generator = RAGGenerator()
-    query = "What is the expense ratio of HDFC Mid-Cap Fund?"
-    response = generator.generate_response(query)
-    print(f"\nQuery: {query}")
-    print("-" * 20)
-    print(response.encode('utf-8', 'replace').decode('utf-8'))
+    def generate_response(self, query: str) -> str:
+        structured = self.generate_structured_response(query)
+        answer = structured.get("answer", "")
+        if structured.get("show_source") and structured.get("source"):
+            src = structured["source"]
+            answer += (
+                f"\n\n*Last updated: {src.get('last_updated', '')} | "
+                f"[{src.get('fund_name', 'Source')}]({src.get('url', '#')})*"
+            )
+        return answer

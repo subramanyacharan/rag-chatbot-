@@ -4,7 +4,7 @@ import os
 
 import chromadb
 
-from src.phase2_knowledge_base.fund_registry import detect_fund_slug, fund_from_slug
+from src.phase2_knowledge_base.fund_registry import detect_fund_slug
 from src.phase2_knowledge_base.vector_db import ensure_vector_db_populated
 from src.phase3_rag_engine.embeddings import get_embedding_model
 
@@ -39,58 +39,29 @@ class FactRetriever:
             name=self.collection_name
         )
 
-    def retrieve_context(self, query: str, top_k: int = 5):
-        """Embed the query and retrieve the most relevant chunks."""
+    def retrieve_context(self, query: str, top_k: int = 5, fund_slug: str | None = None):
+        """Embed the query and retrieve chunks for one fund when slug is known."""
         logging.info("Processing query: '%s'", query)
-        fund_slug = detect_fund_slug(query)
+        fund_slug = fund_slug or detect_fund_slug(query)
+        if not fund_slug:
+            logging.info("No fund in query — skipping vector retrieval.")
+            return []
 
         emb = self.model.encode([query])
         query_embedding = emb.tolist() if hasattr(emb, "tolist") else emb
 
-        query_kwargs = {
-            "query_embeddings": query_embedding,
-            "n_results": top_k,
-            "include": ["documents", "metadatas", "distances"],
-        }
-        if fund_slug:
-            query_kwargs["where"] = {"fund_slug": fund_slug}
-            logging.info("Filtering retrieval to fund_slug=%s", fund_slug)
-
-        results = self.collection.query(**query_kwargs)
+        results = self.collection.query(
+            query_embeddings=query_embedding,
+            n_results=top_k,
+            where={"fund_slug": fund_slug},
+            include=["documents", "metadatas", "distances"],
+        )
         formatted = self._format_results(results)
 
-        if fund_slug and not formatted:
-            logging.info("No chunks for slug filter; retrying without filter.")
-            results = self.collection.query(
-                query_embeddings=query_embedding,
-                n_results=top_k,
-                include=["documents", "metadatas", "distances"],
-            )
-            formatted = self._format_results(results)
-            formatted = self._prefer_slug(formatted, fund_slug)
-
-        if not fund_slug:
-            formatted = self._dedupe_by_fund(formatted)
-
-        return [c for c in formatted if c.get("distance", 999) <= RELEVANCE_MAX_DISTANCE][
-            :top_k
-        ] or formatted[:top_k]
-
-    def _prefer_slug(self, chunks: list, fund_slug: str) -> list:
-        matched = [c for c in chunks if c["metadata"].get("fund_slug") == fund_slug]
-        other = [c for c in chunks if c["metadata"].get("fund_slug") != fund_slug]
-        return matched + other
-
-    def _dedupe_by_fund(self, chunks: list) -> list:
-        seen = set()
-        out = []
-        for c in chunks:
-            slug = c["metadata"].get("fund_slug", "")
-            if slug in seen:
-                continue
-            seen.add(slug)
-            out.append(c)
-        return out + [c for c in chunks if c not in out]
+        relevant = [
+            c for c in formatted if c.get("distance", 999) <= RELEVANCE_MAX_DISTANCE
+        ]
+        return relevant[:top_k] if relevant else formatted[:top_k]
 
     def _format_results(self, raw_results):
         formatted = []
@@ -113,12 +84,13 @@ class FactRetriever:
 
 
 def pick_source_chunk(query: str, chunks: list) -> dict | None:
-    """Choose metadata for citation from the chunk that best matches the query fund."""
+    """Citation chunk must belong to the fund named in the query."""
     if not chunks:
         return None
     fund_slug = detect_fund_slug(query)
-    if fund_slug:
-        for chunk in chunks:
-            if chunk["metadata"].get("fund_slug") == fund_slug:
-                return chunk
-    return chunks[0]
+    if not fund_slug:
+        return None
+    for chunk in chunks:
+        if chunk["metadata"].get("fund_slug") == fund_slug:
+            return chunk
+    return None

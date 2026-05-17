@@ -32,7 +32,7 @@ def mock_retriever():
         return retriever
 
 def test_retrieve_context(mock_retriever):
-    results = mock_retriever.retrieve_context("Test query", top_k=2)
+    results = mock_retriever.retrieve_context("HDFC Mid Cap Fund NAV", top_k=2)
     
     # Ensure query processing (3.1) was called
     mock_retriever.model.encode.assert_called()

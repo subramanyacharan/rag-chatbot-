@@ -180,15 +180,23 @@ function App() {
         return;
       }
 
+      const noSourceStatuses = ['blocked', 'needs_fund', 'no_context', 'error', 'config_error', 'rate_limited'];
       const showSource =
-        data.show_source === true && data.source && data.status === 'success';
+        data.show_source === true &&
+        !!data.source &&
+        data.status === 'success' &&
+        !noSourceStatuses.includes(data.status);
+      const showMetrics =
+        showSource &&
+        data.metrics &&
+        Object.keys(data.metrics).length > 0;
 
       updateActiveSession((prev) => [
         ...prev,
         {
           role: 'assistant',
           content: answer,
-          metrics: data.metrics,
+          metrics: showMetrics ? data.metrics : {},
           source: showSource ? data.source : null,
           showSource,
           status: data.status,

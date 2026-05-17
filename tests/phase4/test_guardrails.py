@@ -16,7 +16,7 @@ def test_input_guard():
     # Off-topic query
     safe, msg = guard.check_query("i love you")
     assert safe is False
-    assert "knowledge base" in msg
+    assert "HDFC" in msg
 
 def test_output_guard():
     guard = OutputGuard()
