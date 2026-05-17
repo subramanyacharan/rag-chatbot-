@@ -12,8 +12,9 @@ def mock_retriever():
             "metadata": {
                 "source_url": "http://example.com/hdfc-midcap",
                 "last_updated": "2026-05-05T12:00:00",
-                "fund_name": "HDFC Mid Cap"
-            }
+                "fund_name": "HDFC Mid Cap",
+            },
+            "distance": 0.2,
         }
     ]
     return retriever
@@ -71,3 +72,25 @@ def test_structured_response_groq_connection_error(mock_groq_class, mock_retriev
     assert result["status"] == "error"
     assert result["answer"] == USER_UNAVAILABLE_MSG
     assert "Connection error" not in result["answer"]
+
+
+@patch("src.phase3_rag_engine.generator.Groq")
+def test_structured_response_irrelevant_retrieval(mock_groq_class, mock_retriever):
+    mock_retriever.retrieve_context.return_value = [
+        {
+            "text": "Unrelated fund data.",
+            "metadata": {"fund_name": "X", "source_url": "http://x.com", "last_updated": "2026-01-01"},
+            "distance": 2.5,
+        }
+    ]
+    generator = RAGGenerator(retriever=mock_retriever)
+    generator.client = MagicMock()
+
+    result = generator.generate_structured_response(
+        "What is the expense ratio of HDFC Mid-Cap Fund?"
+    )
+
+    assert result["status"] == "no_context"
+    assert result["show_source"] is False
+    assert result["source"] is None
+    mock_groq_class.return_value.chat.completions.create.assert_not_called()

@@ -28,12 +28,47 @@ if not os.environ.get("GROQ_API_KEY", "").strip():
     )
 
 
+RELEVANCE_MAX_DISTANCE = float(os.environ.get("RELEVANCE_MAX_DISTANCE", "1.15"))
+
+NO_SOURCE_ANSWER_MARKERS = (
+    "i do not have the information",
+    "cannot provide investment advice",
+    "flagged by safety guardrails",
+    "factual assistant and cannot",
+    "consult a sebi-registered",
+)
+
+
 def _structured_error(status: str = "error", message: str | None = None) -> dict:
     return {
         "answer": message or USER_UNAVAILABLE_MSG,
         "metrics": {},
         "source": None,
+        "show_source": False,
         "status": status,
+    }
+
+
+def _is_context_relevant(chunks: list) -> bool:
+    if not chunks:
+        return False
+    return chunks[0].get("distance", float("inf")) <= RELEVANCE_MAX_DISTANCE
+
+
+def _should_attach_source(chunks: list, answer: str, status: str) -> bool:
+    if status != "success" or not _is_context_relevant(chunks):
+        return False
+    lower = answer.lower()
+    return not any(marker in lower for marker in NO_SOURCE_ANSWER_MARKERS)
+
+
+def _no_context_response() -> dict:
+    return {
+        "answer": "I do not have the information to answer that.",
+        "metrics": {},
+        "source": None,
+        "show_source": False,
+        "status": "no_context",
     }
 
 
@@ -156,20 +191,16 @@ Context:
                 "answer": msg,
                 "metrics": {},
                 "source": None,
-                "status": "blocked"
+                "show_source": False,
+                "status": "blocked",
             }
             
         if not self.client:
             return _structured_error("config_error")
             
         chunks = self.retriever.retrieve_context(query)
-        if not chunks:
-            return {
-                "answer": "I do not have the information to answer that.",
-                "metrics": {},
-                "source": None,
-                "status": "no_context"
-            }
+        if not chunks or not _is_context_relevant(chunks):
+            return _no_context_response()
             
         context_text = "\n".join([f"- {chunk['text']}" for chunk in chunks])
         
@@ -208,16 +239,29 @@ Return your response in EXACTLY this JSON format:
             
             # Post-generation Output Guardrail
             result["answer"] = self.output_guard.check_response(result["answer"])
-            
-            # Add metadata
-            primary_meta = chunks[0]['metadata']
-            result["source"] = {
-                "fund_name": primary_meta.get("fund_name"),
-                "url": primary_meta.get("source_url"),
-                "last_updated": primary_meta.get("last_updated", "").split("T")[0]
-            }
+
+            if "flagged by safety guardrails" in result["answer"].lower():
+                result["metrics"] = {}
+                result["source"] = None
+                result["show_source"] = False
+                result["status"] = "blocked"
+                return result
+
             result["status"] = "success"
-            
+            if _should_attach_source(chunks, result["answer"], result["status"]):
+                primary_meta = chunks[0]["metadata"]
+                result["source"] = {
+                    "fund_name": primary_meta.get("fund_name"),
+                    "url": primary_meta.get("source_url"),
+                    "last_updated": primary_meta.get("last_updated", "").split("T")[0],
+                }
+                result["show_source"] = True
+            else:
+                result["source"] = None
+                result["show_source"] = False
+                if "i do not have the information" in result["answer"].lower():
+                    result["status"] = "no_context"
+
             return result
             
         except (APIConnectionError, APITimeoutError, AuthenticationError, RateLimitError, APIStatusError) as e:

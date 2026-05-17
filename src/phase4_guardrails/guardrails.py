@@ -6,6 +6,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 class InputGuard:
     def __init__(self):
+        self.off_topic_patterns = [
+            r"\b(i love you|marry me|date me)\b",
+            r"\b(weather|temperature|forecast)\b",
+            r"\b(recipe|cook|bake)\b",
+            r"\b(movie|netflix|song lyrics)\b",
+            r"\b(write (me )?a poem|tell (me )?a joke)\b",
+            r"\b(who (is|was) (the )?president of)\b",
+            r"\b(football|cricket score|ipl match)\b",
+        ]
         # Keywords that indicate an advisory intent or prediction
         self.advisory_patterns = [
             r"\b(should i invest)\b",
@@ -26,7 +35,15 @@ class InputGuard:
         Returns (is_safe: bool, violation_message: str)
         """
         lower_query = query.lower()
-        
+
+        for pattern in self.off_topic_patterns:
+            if re.search(pattern, lower_query):
+                logging.warning(f"Off-topic query blocked by pattern: {pattern}")
+                return False, (
+                    "I can only answer factual questions about the HDFC mutual funds "
+                    "in my knowledge base (expense ratio, NAV, exit load, etc.)."
+                )
+
         for pattern in self.advisory_patterns:
             if re.search(pattern, lower_query):
                 logging.warning(f"Input Guardrail triggered by pattern: {pattern}")

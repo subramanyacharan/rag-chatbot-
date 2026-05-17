@@ -13,6 +13,11 @@ def test_input_guard():
     assert safe is False
     assert "SEBI-registered" in msg
 
+    # Off-topic query
+    safe, msg = guard.check_query("i love you")
+    assert safe is False
+    assert "knowledge base" in msg
+
 def test_output_guard():
     guard = OutputGuard()
     
