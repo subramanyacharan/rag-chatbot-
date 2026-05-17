@@ -1,0 +1,56 @@
+import pytest
+from unittest.mock import patch, MagicMock
+from src.phase3_rag_engine.generator import RAGGenerator
+
+@pytest.fixture
+def mock_retriever():
+    retriever = MagicMock()
+    retriever.retrieve_context.return_value = [
+        {
+            "text": "The expense ratio is 0.73%.",
+            "metadata": {
+                "source_url": "http://example.com/hdfc-midcap",
+                "last_updated": "2026-05-05T12:00:00",
+                "fund_name": "HDFC Mid Cap"
+            }
+        }
+    ]
+    return retriever
+
+def test_construct_prompt(mock_retriever):
+    generator = RAGGenerator(retriever=mock_retriever)
+    # Patch api key warning check by manually setting client None
+    generator.client = None 
+    
+    chunks = mock_retriever.retrieve_context("query")
+    prompt = generator.construct_prompt("query", chunks)
+    
+    assert "The expense ratio is 0.73%." in prompt
+    assert "maximum 3 sentences" in prompt
+    assert "ONLY using the provided Context" in prompt
+
+@patch("src.phase3_rag_engine.generator.Groq")
+def test_generate_response(mock_groq_class, mock_retriever):
+    # Setup mock Groq client
+    mock_client = MagicMock()
+    mock_completion = MagicMock()
+    mock_message = MagicMock()
+    
+    mock_message.content = "The expense ratio is 0.73%."
+    mock_completion.choices = [MagicMock(message=mock_message)]
+    mock_client.chat.completions.create.return_value = mock_completion
+    
+    mock_groq_class.return_value = mock_client
+    
+    generator = RAGGenerator(retriever=mock_retriever)
+    generator.client = mock_client
+    
+    response = generator.generate_response("What is the expense ratio?")
+    
+    # Assert LLM was called
+    mock_client.chat.completions.create.assert_called_once()
+    
+    # Assert response and footer
+    assert "The expense ratio is 0.73%." in response
+    assert "Last updated from sources: 2026-05-05" in response
+    assert "[HDFC Mid Cap](http://example.com/hdfc-midcap)" in response
