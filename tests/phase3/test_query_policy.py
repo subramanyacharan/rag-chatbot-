@@ -7,9 +7,9 @@ from src.phase3_rag_engine.query_policy import (
 )
 
 
-def test_off_topic_greeting():
-    assert is_off_topic("hello") is True
-    assert classify_query("hello")["kind"] == "off_topic"
+def test_greeting():
+    assert is_off_topic("hello") is False
+    assert classify_query("hello")["kind"] == "greeting"
 
 
 def test_needs_fund_without_name():

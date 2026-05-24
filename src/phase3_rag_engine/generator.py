@@ -134,6 +134,15 @@ class RAGGenerator:
 
         policy = classify_query(query)
 
+        if policy["kind"] == "greeting":
+            return {
+                "answer": "Hello! How can I help you today?",
+                "metrics": {},
+                "source": None,
+                "show_source": False,
+                "status": "success",
+            }
+
         if policy["kind"] == "off_topic":
             return {
                 "answer": (

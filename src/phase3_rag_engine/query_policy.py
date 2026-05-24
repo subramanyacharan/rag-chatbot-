@@ -28,7 +28,11 @@ OFF_TOPIC_PATTERNS = [
     r"\b(write (me )?a poem|tell (me )?a joke)\b",
     r"\b(who (is|was) (the )?president of)\b",
     r"\b(football|cricket score|ipl match)\b",
-    r"^(hi|hello|hey)[\s!.?]*$",
+]
+
+# Patterns for simple greetings
+GREETING_PATTERNS = [
+    r"^(hi|hello|hey|greetings|good morning|good afternoon|good evening)[\s!.?]*$",
 ]
 
 # Patterns for queries about funds not in our HDFC corpus
@@ -136,8 +140,21 @@ def is_off_topic(query: str) -> bool:
     for pattern in OFF_TOPIC_PATTERNS:
         if re.search(pattern, q):
             return True
+    if is_greeting(q):
+        return False
     if not _mentions_allowed_topic(q):
         return True
+    return False
+
+
+def is_greeting(query: str) -> bool:
+    """Check if query is a simple greeting."""
+    q = query.lower().strip()
+    if not q:
+        return False
+    for pattern in GREETING_PATTERNS:
+        if re.search(pattern, q):
+            return True
     return False
 
 
@@ -280,7 +297,17 @@ def classify_query(query: str) -> dict:
             "reason": "Query contains personally identifiable information (PAN, Aadhaar, phone, email, etc.)",
         }
     
-    # Priority 2: Personal/account queries
+    # Priority 2: Greetings
+    if is_greeting(query):
+        return {
+            "kind": "greeting",
+            "fund_slug": None,
+            "fund_name": None,
+            "show_source": False,
+            "reason": None,
+        }
+    
+    # Priority 3: Personal/account queries
     if is_personal_query(query):
         return {
             "kind": "personal_query",
