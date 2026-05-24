@@ -128,12 +128,14 @@ def _available_funds_hint() -> str:
     )
 
 
-def is_off_topic(query: str) -> bool:
+def is_off_topic(query: str, context_fund: str = None) -> bool:
     """Check if query is completely off-topic (non-financial)."""
     q = query.lower().strip()
     if not q:
         return True
     if detect_fund_slug(query):
+        return False
+    if context_fund and detect_fund_slug(context_fund) and _mentions_allowed_topic(q):
         return False
     if "hdfc" in q and any(kw in q for kw in TOPIC_KEYWORDS):
         return False
@@ -276,16 +278,20 @@ def _mentions_allowed_topic(q: str) -> bool:
     return any(kw in q for kw in TOPIC_KEYWORDS)
 
 
-def needs_fund_specification(query: str) -> bool:
-    """True when on-topic but no identifiable fund in the query."""
+def needs_fund_specification(query: str, context_fund: str = None) -> bool:
+    """True when on-topic but no identifiable fund in the query or context."""
     if detect_fund_slug(query):
+        return False
+    if context_fund and detect_fund_slug(context_fund):
         return False
     return _mentions_allowed_topic(query.lower())
 
 
-def classify_query(query: str) -> dict:
+def classify_query(query: str, context_fund: str = None) -> dict:
     """Classify query into categories with strict filtering."""
     fund_slug = detect_fund_slug(query)
+    if not fund_slug and context_fund:
+        fund_slug = detect_fund_slug(context_fund)
     
     # Priority 1: PII and privacy violations
     if contains_pii(query):
@@ -408,7 +414,7 @@ def classify_query(query: str) -> dict:
         }
     
     # Priority 12: Needs fund specification
-    if needs_fund_specification(query):
+    if needs_fund_specification(query, context_fund):
         return {
             "kind": "needs_fund",
             "fund_slug": None,
@@ -428,13 +434,16 @@ def classify_query(query: str) -> dict:
     }
 
 
-def filter_chunks_for_query(query: str, chunks: list, max_chunks: int = 3) -> list:
+def filter_chunks_for_query(query: str, chunks: list, context_fund: str = None, max_chunks: int = 3) -> list:
     """Keep only chunks that match the asked metric and target fund."""
     if not chunks:
         return []
 
     q = query.lower()
     fund_slug = detect_fund_slug(query)
+    if not fund_slug and context_fund:
+        fund_slug = detect_fund_slug(context_fund)
+        
     if fund_slug:
         chunks = [c for c in chunks if c["metadata"].get("fund_slug") == fund_slug]
 
@@ -486,16 +495,19 @@ def filter_metrics_for_query(query: str, metrics: dict) -> dict:
     return {}
 
 
-def can_show_source(query: str, chunks: list, answer: str, status: str) -> bool:
-    policy = classify_query(query)
+def can_show_source(query: str, chunks: list, answer: str, status: str, context_fund: str = None) -> bool:
+    policy = classify_query(query, context_fund)
     if not policy["show_source"] or status != "success":
         return False
-    if not chunks or not detect_fund_slug(query):
+    slug = detect_fund_slug(query)
+    if not slug and context_fund:
+        slug = detect_fund_slug(context_fund)
+        
+    if not chunks or not slug:
         return False
     if chunks[0].get("distance", 999) > SOURCE_MAX_DISTANCE:
         return False
 
-    slug = detect_fund_slug(query)
     if not all(c["metadata"].get("fund_slug") == slug for c in chunks):
         return False
 

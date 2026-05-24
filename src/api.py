@@ -39,8 +39,11 @@ app.add_middleware(
 )
 
 
+from typing import Optional
+
 class QueryRequest(BaseModel):
     query: str
+    context_fund: Optional[str] = None
 
 
 @app.get("/")
@@ -51,7 +54,9 @@ async def root():
 @app.post("/chat")
 async def chat(request: QueryRequest):
     try:
-        response_data = get_generator().generate_structured_response(request.query)
+        response_data = get_generator().generate_structured_response(
+            request.query, context_fund=request.context_fund
+        )
         if response_data.get("status") in ("error", "config_error", "rate_limited"):
             raise HTTPException(status_code=503, detail=response_data.get("answer"))
         return response_data

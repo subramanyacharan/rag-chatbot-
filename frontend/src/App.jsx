@@ -122,11 +122,16 @@ function App() {
       return;
     }
 
+    const lastFundSource = messages.slice().reverse().find((m) => m.role === 'assistant' && m.source?.fund_name)?.source?.fund_name;
+
     try {
       const response = await fetch(`${apiUrl}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: currentQuery }),
+        body: JSON.stringify({ 
+          query: currentQuery,
+          context_fund: lastFundSource || null
+        }),
       });
 
       let data;

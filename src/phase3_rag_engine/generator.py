@@ -121,8 +121,8 @@ class RAGGenerator:
             else None
         )
 
-    def generate_structured_response(self, query: str) -> dict:
-        is_safe, msg = self.input_guard.check_query(query)
+    def generate_structured_response(self, query: str, context_fund: str = None) -> dict:
+        is_safe, msg = self.input_guard.check_query(query, context_fund)
         if not is_safe:
             return {
                 "answer": msg,
@@ -132,7 +132,7 @@ class RAGGenerator:
                 "status": "blocked",
             }
 
-        policy = classify_query(query)
+        policy = classify_query(query, context_fund)
 
         if policy["kind"] == "greeting":
             return {
@@ -171,7 +171,7 @@ class RAGGenerator:
         chunks = self.retriever.retrieve_context(
             query, fund_slug=policy["fund_slug"]
         )
-        chunks = filter_chunks_for_query(query, chunks)
+        chunks = filter_chunks_for_query(query, chunks, context_fund)
 
         if not chunks or not _is_context_relevant(chunks):
             return _no_context_response()
@@ -206,7 +206,7 @@ class RAGGenerator:
             result["status"] = "success"
 
             source_chunk = pick_source_chunk(query, chunks)
-            if can_show_source(query, chunks, result["answer"], result["status"]) and source_chunk:
+            if can_show_source(query, chunks, result["answer"], result["status"], context_fund) and source_chunk:
                 meta = source_chunk["metadata"]
                 result["source"] = {
                     "fund_name": meta.get("fund_name"),

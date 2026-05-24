@@ -95,7 +95,7 @@ class InputGuard:
             r"\b(franklin templeton|franklin india)\b",
         ]
         
-    def check_query(self, query: str) -> tuple[bool, str]:
+    def check_query(self, query: str, context_fund: str = None) -> tuple[bool, str]:
         """
         Phase 4.1: Check if the user query violates constraints.
         Returns (is_safe: bool, violation_message: str)
@@ -158,7 +158,7 @@ class InputGuard:
                 )
 
         # Priority 7: Off-topic queries
-        if is_off_topic(query):
+        if is_off_topic(query, context_fund):
             logging.warning("Off-topic query blocked.")
             return False, (
                 "I can only answer factual questions about specific HDFC mutual funds "
